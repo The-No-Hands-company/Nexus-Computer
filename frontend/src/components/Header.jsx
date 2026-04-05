@@ -91,6 +91,16 @@ const S = {
     whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
   },
+  actionButton: {
+    padding: '4px 10px',
+    borderRadius: '999px',
+    border: '1px solid rgba(0,217,255,0.18)',
+    background: 'rgba(0,217,255,0.06)',
+    color: 'var(--accent)',
+    fontSize: '9px',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+  },
   status: (online) => ({
     display: 'flex',
     alignItems: 'center',
@@ -112,7 +122,7 @@ const pulse = `@keyframes pulse {
   50% { opacity: 0.4; }
 }`
 
-export default function Header() {
+export default function Header({ onOpenPalette }) {
   const [online, setOnline] = useState(false)
   const [time, setTime] = useState(new Date())
   const [meta, setMeta] = useState(null)
@@ -158,6 +168,7 @@ export default function Header() {
         <span style={S.meta} title="Community demand">
           {meta?.feature_requests ?? 0} open requests
         </span>
+        <button style={S.actionButton} onClick={onOpenPalette}>⌘K</button>
         <div style={S.status(online)}>
           <div style={S.statusDot(online)} />
           {online ? 'ONLINE' : 'OFFLINE'}

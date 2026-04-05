@@ -29,6 +29,15 @@ const SearchIcon = () => (
   </svg>
 )
 
+const CommandIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M18 3v18"/>
+    <path d="M6 3v18"/>
+    <path d="M3 6h18"/>
+    <path d="M3 18h18"/>
+  </svg>
+)
+
 /* ── styles ── */
 const S = {
   panel: {
@@ -88,6 +97,22 @@ const S = {
     cursor: 'pointer',
     transition: 'all 0.15s',
     background: 'transparent',
+  },
+  shortcutRow: {
+    display: 'flex',
+    gap: '8px',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  shortcutButton: {
+    padding: '5px 10px',
+    borderRadius: '999px',
+    border: '1px solid rgba(0,217,255,0.18)',
+    background: 'rgba(0,217,255,0.06)',
+    color: 'var(--accent)',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
   },
   msg: (role) => ({
     display: 'flex',
@@ -242,6 +267,17 @@ const S = {
     color: 'var(--text)',
     fontSize: '12px',
   },
+  footerHint: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: '8px',
+    color: 'var(--text-muted)',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+  },
 }
 
 const QUICK_PROMPTS = [
@@ -307,7 +343,7 @@ function Message({ msg }) {
 }
 
 /* ── Main Chat ── */
-export default function Chat({ selectedFile, onFsChange }) {
+export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -478,6 +514,10 @@ export default function Chat({ selectedFile, onFsChange }) {
                 </button>
               ))}
             </div>
+            <div style={S.shortcutRow}>
+              <button style={S.shortcutButton} onClick={onOpenPalette}><CommandIcon /> Command palette</button>
+              <button style={S.shortcutButton} onClick={() => sendMessage('Show me the workspace layout')}>Inspect workspace</button>
+            </div>
             {meta?.values?.[0] && (
               <div style={{ color: 'var(--text-muted)', fontSize: '10px', letterSpacing: '0.08em' }}>
                 {meta.values.join(' • ')}
@@ -522,6 +562,10 @@ export default function Chat({ selectedFile, onFsChange }) {
               rows={1}
               disabled={streaming}
             />
+          </div>
+          <div style={S.footerHint}>
+            <span>Shift+Enter newline</span>
+            <span>⌘K palette</span>
           </div>
         </div>
         <button
