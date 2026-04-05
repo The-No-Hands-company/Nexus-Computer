@@ -22,6 +22,19 @@ const styles = {
     background: 'var(--border)',
     flexShrink: 0,
   },
+  footer: {
+    height: '24px',
+    borderTop: '1px solid var(--border-dim)',
+    background: 'rgba(255,255,255,0.01)',
+    color: 'var(--text-muted)',
+    fontSize: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 12px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+  },
 }
 
 export default function App() {
@@ -44,6 +57,10 @@ export default function App() {
           selectedFile={selectedFile}
           onFsChange={refresh}
         />
+      </div>
+      <div style={styles.footer}>
+        <span>Free • Open • Private</span>
+        <span>Workspace-backed AI computer</span>
       </div>
     </div>
   )

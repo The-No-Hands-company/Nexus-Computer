@@ -10,7 +10,7 @@ import shutil
 import time
 
 from agent import run_agent_stream
-from tools import list_files_api, read_file_api, write_file_api, delete_file_api
+from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api
 
 app = FastAPI(title="Nexus.computer API")
 
@@ -34,6 +34,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
+    search: str | None = None
 
 
 class FileWriteRequest(BaseModel):
@@ -79,12 +80,29 @@ async def meta():
     }
 
 
+@app.get("/api/search")
+async def search(q: str, path: str = ""):
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="q cannot be empty")
+    return search_files_api(WORKSPACE, q, path)
+
+
 @app.post("/api/chat")
 async def chat(body: ChatRequest):
     if not body.messages:
         raise HTTPException(status_code=400, detail="messages cannot be empty")
+    if body.search:
+        search_results = search_files_api(WORKSPACE, body.search, "")
+        augmented = body.messages + [
+            ChatMessage(
+                role="assistant",
+                content="Workspace search context:\n" + str(search_results),
+            )
+        ]
+    else:
+        augmented = body.messages
     return StreamingResponse(
-        run_agent_stream([m.model_dump() for m in body.messages], WORKSPACE),
+        run_agent_stream([m.model_dump() for m in augmented], WORKSPACE),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

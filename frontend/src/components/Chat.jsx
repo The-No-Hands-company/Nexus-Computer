@@ -22,9 +22,10 @@ const FileIcon = () => (
   </svg>
 )
 
-const ShieldIcon = () => (
+const SearchIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <circle cx="11" cy="11" r="8"/>
+    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
   </svg>
 )
 
@@ -70,23 +71,6 @@ const S = {
     maxWidth: '420px',
     textAlign: 'center',
     lineHeight: 1.8,
-  },
-  metaRow: {
-    display: 'flex',
-    gap: '8px',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    marginTop: '2px',
-  },
-  metaPill: {
-    padding: '4px 10px',
-    border: '1px solid var(--border)',
-    borderRadius: '999px',
-    color: 'var(--text-muted)',
-    fontSize: '10px',
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
-    background: 'rgba(255,255,255,0.02)',
   },
   prompts: {
     display: 'flex',
@@ -227,6 +211,37 @@ const S = {
     gap: '6px',
     marginBottom: '8px',
   },
+  searchContext: {
+    padding: '6px 12px',
+    background: 'rgba(255,184,48,0.06)',
+    border: '1px solid rgba(255,184,48,0.18)',
+    borderRadius: '4px',
+    fontSize: '11px',
+    color: 'var(--amber)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginBottom: '8px',
+  },
+  miniRow: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+    marginBottom: '8px',
+    color: 'var(--text-dim)',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+  },
+  searchInput: {
+    flex: 1,
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    borderRadius: '8px',
+    padding: '8px 10px',
+    color: 'var(--text)',
+    fontSize: '12px',
+  },
 }
 
 const QUICK_PROMPTS = [
@@ -296,6 +311,7 @@ export default function Chat({ selectedFile, onFsChange }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [search, setSearch] = useState('')
   const [meta, setMeta] = useState(null)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
@@ -313,15 +329,15 @@ export default function Chat({ selectedFile, onFsChange }) {
   }, [])
 
   useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
     fetch('/api/meta')
       .then(r => r.json())
       .then(setMeta)
       .catch(() => setMeta(null))
   }, [])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   const buildApiMessages = useCallback((msgs) => {
     return msgs
@@ -351,7 +367,7 @@ export default function Chat({ selectedFile, onFsChange }) {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify({ messages: buildApiMessages(newMessages) }),
+        body: JSON.stringify({ messages: buildApiMessages(newMessages), search: search.trim() || null }),
       })
 
       if (!response.ok || !response.body) {
@@ -406,7 +422,7 @@ export default function Chat({ selectedFile, onFsChange }) {
     } finally {
       setStreaming(false)
     }
-  }, [messages, streaming, buildApiMessages, onFsChange])
+  }, [messages, streaming, buildApiMessages, onFsChange, search])
 
   const handleKey = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -422,7 +438,6 @@ export default function Chat({ selectedFile, onFsChange }) {
   }, [])
 
   const isEmpty = messages.length === 0
-  const metaLine = meta?.values?.slice(0, 3).join(' • ')
 
   return (
     <div style={S.panel}>
@@ -431,13 +446,19 @@ export default function Chat({ selectedFile, onFsChange }) {
           <div style={S.welcome}>
             <div style={S.welcomeTitle}>NEXUS</div>
             <div style={S.welcomeSub}>
-              Your private cloud computer. Build software, inspect files, run commands,
-              and automate work without paywalls or surveillance.
+              Your free, private cloud computer. Ask me to build apps, inspect files,
+              run commands, or search the workspace.
             </div>
-            <div style={S.metaRow}>
-              <span style={S.metaPill}><ShieldIcon /> Free as in freedom</span>
-              {metaLine && <span style={S.metaPill}>{metaLine}</span>}
+            <div style={S.miniRow}>
+              <SearchIcon />
+              <span>Workspace search</span>
             </div>
+            <input
+              style={S.searchInput}
+              placeholder="Search workspace before chat..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
             <div style={S.prompts}>
               {QUICK_PROMPTS.map(p => (
                 <button
@@ -457,6 +478,11 @@ export default function Chat({ selectedFile, onFsChange }) {
                 </button>
               ))}
             </div>
+            {meta?.values?.[0] && (
+              <div style={{ color: 'var(--text-muted)', fontSize: '10px', letterSpacing: '0.08em' }}>
+                {meta.values.join(' • ')}
+              </div>
+            )}
           </div>
         ) : (
           messages.map((msg, i) => <Message key={i} msg={msg} />)
@@ -473,6 +499,12 @@ export default function Chat({ selectedFile, onFsChange }) {
             <div style={S.fileContext}>
               <FileIcon />
               <span>Context: {selectedFile.name}</span>
+            </div>
+          )}
+          {search.trim() && (
+            <div style={S.searchContext}>
+              <SearchIcon />
+              <span>Search: {search.trim()}</span>
             </div>
           )}
           <div

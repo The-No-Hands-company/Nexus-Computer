@@ -12,6 +12,73 @@ def _safe(workspace: str, path: str) -> str:
     return resolved
 
 
+def _looks_binary(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(4096)
+        return b"\x00" in chunk
+    except Exception:
+        return True
+
+
+def search_files_api(workspace: str, query: str, path: str = "", limit: int = 50):
+    try:
+        query = (query or "").strip()
+        if not query:
+            return {"query": query, "path": path, "items": []}
+
+        target = _safe(workspace, path)
+        if not os.path.exists(target):
+            return {"query": query, "path": path, "items": []}
+
+        q = query.lower()
+        items = []
+        max_bytes = 250_000
+
+        for root, dirs, files in os.walk(target):
+            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "dist", "Trash"}]
+            for name in files:
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, workspace).replace(os.sep, "/")
+                rel_in_scope = os.path.relpath(full, target).replace(os.sep, "/")
+                name_match = q in name.lower() or q in rel.lower()
+                snippet = ""
+                content_match = False
+                if not _looks_binary(full):
+                    try:
+                        if os.path.getsize(full) <= max_bytes:
+                            with open(full, "r", errors="replace") as f:
+                                content = f.read(max_bytes)
+                            lowered = content.lower()
+                            idx = lowered.find(q)
+                            if idx != -1:
+                                content_match = True
+                                start = max(0, idx - 80)
+                                end = min(len(content), idx + len(query) + 160)
+                                snippet = content[start:end].replace("\n", " ").strip()
+                    except Exception:
+                        pass
+
+                if name_match or content_match:
+                    items.append({
+                        "path": rel,
+                        "name": name,
+                        "scope_path": rel_in_scope,
+                        "type": "content" if content_match and not name_match else "path",
+                        "snippet": snippet,
+                    })
+                    if len(items) >= limit:
+                        break
+            if len(items) >= limit:
+                break
+
+        return {"query": query, "path": path, "items": items}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def list_files_api(workspace: str, path: str = ""):
     try:
         target = _safe(workspace, path)

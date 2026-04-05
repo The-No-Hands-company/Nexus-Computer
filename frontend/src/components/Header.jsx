@@ -61,9 +61,11 @@ const S = {
   right: {
     display: 'flex',
     alignItems: 'center',
-    gap: '14px',
+    gap: '12px',
     fontSize: '11px',
     color: 'var(--text-dim)',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
   },
   pill: {
     padding: '3px 8px',
@@ -74,6 +76,20 @@ const S = {
     letterSpacing: '0.05em',
     textTransform: 'uppercase',
     fontSize: '9px',
+  },
+  meta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '3px 8px',
+    borderRadius: '999px',
+    border: '1px solid var(--border-dim)',
+    background: 'rgba(255,255,255,0.015)',
+    color: 'var(--text-dim)',
+    maxWidth: '340px',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
   },
   status: (online) => ({
     display: 'flex',
@@ -120,6 +136,7 @@ export default function Header() {
   }, [])
 
   const timeStr = time.toLocaleTimeString('en-GB', { hour12: false })
+  const metaLine = meta ? `${meta.values?.join(' · ') || meta.name}` : 'private workspace'
 
   return (
     <header style={S.header}>
@@ -135,7 +152,9 @@ export default function Header() {
 
       <div style={S.right}>
         <span style={S.pill}>Free • Open • Private</span>
-        {meta?.values?.[0] && <span style={{ color: 'var(--text-muted)' }}>{meta.values[0]}</span>}
+        <span style={S.meta} title={metaLine}>
+          {meta?.name || 'Nexus'}
+        </span>
         <div style={S.status(online)}>
           <div style={S.statusDot(online)} />
           {online ? 'ONLINE' : 'OFFLINE'}
