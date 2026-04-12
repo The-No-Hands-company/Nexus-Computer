@@ -1,6 +1,6 @@
 # Nexus.computer
 
-Nexus is a privacy-first personal cloud computer for The No Hands Company.
+Nexus Computer is a privacy-first personal cloud computer for The No Hands Company.
 It is built to feel like a calm, powerful, production-grade alternative to the Zo computer experience:
 free as in freedom, open source, private by default, and never paywalled.
 
