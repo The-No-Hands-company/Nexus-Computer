@@ -20,6 +20,7 @@
   --font-brand: 'Orbitron', monospace;
   --font-mono:  'JetBrains Mono', monospace;
   --radius:     4px;
+  color-scheme: dark;
 }
 
 *, *::before, *::after {
@@ -32,6 +33,7 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
 }
+html { -webkit-text-size-adjust: 100%; }
 
 body {
   font-family: var(--font-mono);
@@ -40,6 +42,7 @@ body {
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
@@ -58,6 +61,8 @@ button {
   border: none;
   background: none;
   color: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,

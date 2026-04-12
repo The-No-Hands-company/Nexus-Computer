@@ -1,10 +1,22 @@
 import anthropic
+import httpx
 import json
 import os
 import subprocess
 from typing import AsyncGenerator
 
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+# ── AI engine selection ────────────────────────────────────────────────────────
+# By default Nexus Computer uses the Anthropic SDK directly.
+# Set NEXUS_AI_URL (e.g. http://localhost:7866) to route through Nexus AI — the
+# sovereign NS AI engine — instead. ANTHROPIC_API_KEY takes priority if present.
+
+_NEXUS_AI_URL = os.environ.get("NEXUS_AI_URL", "").rstrip("/")
+_ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY")
+
+if _ANTHROPIC_KEY:
+    client = anthropic.Anthropic(api_key=_ANTHROPIC_KEY)
+else:
+    client = None  # will use Nexus AI path
 
 MODEL = os.environ.get("NEXUS_MODEL", "claude-sonnet-4-6")
 
@@ -151,9 +163,84 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-async def run_agent_stream(messages: list, workspace: str):
-    """Agentic loop with SSE streaming — handles multi-step tool use."""
+async def _nexus_ai_stream(messages: list):
+    """Stream via Nexus AI engine when Anthropic key is absent.
 
+    Nexus AI handles tool execution internally — Nexus Computer acts as a
+    thin client.  SSE events coming from Nexus AI are mapped to the same
+    format the Nexus Computer frontend expects.
+    """
+    # Last user message becomes the task; prior turns are sent as history.
+    turns = [{"role": m["role"], "content": m["content"]} for m in messages]
+    history = turns[:-1]
+    task = turns[-1]["content"] if turns else ""
+
+    url = f"{_NEXUS_AI_URL}/agent/stream"
+    payload = json.dumps({"task": task, "session_id": None, "files": []})
+
+    intro = f"[Nexus AI engine — {_NEXUS_AI_URL}]\n"
+    yield _sse({"type": "text", "content": intro})
+
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as http:
+            async with http.stream("POST", url,
+                                   content=payload,
+                                   headers={"Content-Type": "application/json"}) as resp:
+                resp.raise_for_status()
+                async for raw_line in resp.aiter_lines():
+                    if not raw_line.startswith("data:"):
+                        continue
+                    data_str = raw_line[5:].strip()
+                    if not data_str:
+                        continue
+                    try:
+                        evt = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    etype = evt.get("type", "")
+                    if etype == "done":
+                        content = evt.get("content", "")
+                        if content:
+                            yield _sse({"type": "text", "content": content})
+                        yield _sse({"type": "done"})
+                        return
+                    elif etype == "think":
+                        thought = evt.get("thought", "")
+                        if thought:
+                            yield _sse({"type": "text", "content": f"💭 {thought}\n"})
+                    elif etype == "tool":
+                        action = evt.get("action", "tool")
+                        icon = evt.get("icon", "🔧")
+                        result = evt.get("result", "")
+                        yield _sse({"type": "tool_use", "name": action,
+                                    "input": {"action": action, "result": result, "icon": icon}})
+                    elif etype == "error":
+                        yield _sse({"type": "text", "content": f"❌ {evt.get('message', 'Error')}\n"})
+                        yield _sse({"type": "done"})
+                        return
+    except Exception as e:
+        yield _sse({"type": "text", "content": f"❌ Nexus AI connection failed: {e}\n"})
+        yield _sse({"type": "done"})
+
+
+async def run_agent_stream(messages: list, workspace: str):
+    """Agentic loop with SSE streaming.
+
+    Routes to Nexus AI when NEXUS_AI_URL is set and ANTHROPIC_API_KEY is absent.
+    """
+    # ── Nexus AI path ──────────────────────────────────────────────────────
+    if not _ANTHROPIC_KEY and _NEXUS_AI_URL:
+        async for chunk in _nexus_ai_stream(messages):
+            yield chunk
+        return
+
+    if client is None:
+        yield _sse({"type": "text", "content": "❌ No AI engine configured. Set NEXUS_AI_URL or ANTHROPIC_API_KEY.\n"})
+        yield _sse({"type": "done"})
+        return
+
+    # ── Anthropic path (default) ───────────────────────────────────────────
     anthropic_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     while True:
