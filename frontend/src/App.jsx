@@ -5,8 +5,12 @@ import Chat from './components/Chat'
 import CommunityPanel from './components/CommunityPanel'
 import AccountPanel from './components/AccountPanel'
 import PluginPanel from './components/PluginPanel'
+import PersonasPanel from './components/PersonasPanel'
 import CommandPalette from './components/CommandPalette'
 import NetworkPanel from './components/NetworkPanel'
+import ActionsPanel from './components/ActionsPanel'
+import SnapshotPanel from './components/SnapshotPanel'
+import ToolsHubPanel from './components/ToolsHubPanel'
 
 const styles = {
   app: {
@@ -26,8 +30,16 @@ const styles = {
     width: '260px',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    overflowY: 'auto',
     flexShrink: 0,
+  },
+  middleColumn: {
+    width: '340px',
+    display: 'flex',
+    flexDirection: 'column',
+    overflowY: 'auto',
+    flexShrink: 0,
+    background: 'var(--bg-2)',
   },
   subDivider: {
     height: '1px',
@@ -87,17 +99,21 @@ export default function App() {
     { id: 'open-community', label: 'Focus community requests', description: 'Move attention to feature voting', keywords: ['community', 'requests'], action: () => document.querySelector('[data-panel="community"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
     { id: 'open-files', label: 'Focus files', description: 'Bring the workspace explorer into view', keywords: ['files', 'explorer'], action: () => document.querySelector('[data-panel="files"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
     { id: 'open-account', label: 'Focus account', description: 'Show account and session controls', keywords: ['account', 'sessions'], action: () => document.querySelector('[data-panel="account"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+    { id: 'open-personas', label: 'Focus personas', description: 'Show persona presets and prompt controls', keywords: ['persona', 'prompts', 'system'], action: () => document.querySelector('[data-panel="personas"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
     { id: 'open-plugins', label: 'Focus plugins', description: 'Show plugin installs', keywords: ['plugins', 'apps'], action: () => document.querySelector('[data-panel="plugins"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
     { id: 'open-network', label: 'Focus network health', description: 'Show Nexus federation network stats', keywords: ['network', 'federation', 'nodes', 'health'], action: () => document.querySelector('[data-panel="network"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+    { id: 'open-actions', label: 'Focus action ledger', description: 'Show recent tool events and results', keywords: ['actions', 'ledger', 'audit'], action: () => document.querySelector('[data-panel="actions"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+    { id: 'open-snapshots', label: 'Focus snapshots', description: 'Manage workspace snapshot and restore', keywords: ['snapshot', 'restore', 'backup'], action: () => document.querySelector('[data-panel="snapshots"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+    { id: 'open-tools-hub', label: 'Focus tools hub', description: 'Review scaffolded Nexus tools and apps', keywords: ['tools', 'hub', 'standalone', 'cloud'], action: () => document.querySelector('[data-panel="tools-hub"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
   ]), [refresh])
 
   return (
     <div style={styles.app}>
       <Header onOpenPalette={() => setPaletteOpen(true)} />
       <div style={styles.topBanner}>
+        <span style={styles.pill}>Nexus Cloud: central operating hub</span>
+        <span style={styles.pill}>Modes: standalone + hub-integrated</span>
         <span style={styles.pill}>Session: persistent workspace</span>
-        <span style={styles.pill}>Account: local-first shell</span>
-        <span style={styles.pill}>Plugins: next layer ready</span>
       </div>
       <div style={styles.workspace}>
         <div style={styles.leftColumn}>
@@ -113,6 +129,10 @@ export default function App() {
             <AccountPanel />
           </div>
           <div style={styles.subDivider} />
+          <div data-panel="personas">
+            <PersonasPanel />
+          </div>
+          <div style={styles.subDivider} />
           <div data-panel="plugins">
             <PluginPanel />
           </div>
@@ -123,6 +143,20 @@ export default function App() {
           <div style={styles.subDivider} />
           <div data-panel="network" style={{ flex: 1, minHeight: 0 }}>
             <NetworkPanel />
+          </div>
+        </div>
+        <div style={styles.divider} />
+        <div style={styles.middleColumn}>
+          <div data-panel="actions">
+            <ActionsPanel />
+          </div>
+          <div style={styles.subDivider} />
+          <div data-panel="snapshots">
+            <SnapshotPanel />
+          </div>
+          <div style={styles.subDivider} />
+          <div data-panel="tools-hub" style={{ flex: 1, minHeight: 0 }}>
+            <ToolsHubPanel />
           </div>
         </div>
         <div style={styles.divider} />

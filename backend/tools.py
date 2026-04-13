@@ -1,6 +1,7 @@
 import os
 import shutil
 from fastapi import HTTPException
+from policy import load_policy, is_protected_path, policy_decision
 
 
 def _safe(workspace: str, path: str) -> str:
@@ -123,6 +124,16 @@ def read_file_api(workspace: str, path: str):
 
 def write_file_api(workspace: str, path: str, content: str):
     try:
+        policy = load_policy(workspace)
+        decision = policy_decision(policy, "write")
+        rel = path.lstrip("/")
+        if is_protected_path(rel, policy):
+            raise HTTPException(status_code=403, detail="policy denied write to protected path")
+        if decision == "deny":
+            raise HTTPException(status_code=403, detail="policy denied write action")
+        if decision == "confirm":
+            raise HTTPException(status_code=409, detail="write requires confirmation by policy")
+
         target = _safe(workspace, path)
         parent = os.path.dirname(target)
         if parent:
@@ -138,6 +149,16 @@ def write_file_api(workspace: str, path: str, content: str):
 
 def delete_file_api(workspace: str, path: str):
     try:
+        policy = load_policy(workspace)
+        decision = policy_decision(policy, "delete")
+        rel = path.lstrip("/")
+        if is_protected_path(rel, policy):
+            raise HTTPException(status_code=403, detail="policy denied delete on protected path")
+        if decision == "deny":
+            raise HTTPException(status_code=403, detail="policy denied delete action")
+        if decision == "confirm":
+            raise HTTPException(status_code=409, detail="delete requires confirmation by policy")
+
         target = _safe(workspace, path)
         if os.path.isdir(target):
             shutil.rmtree(target)

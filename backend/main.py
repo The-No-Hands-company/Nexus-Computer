@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Literal
 import json
@@ -14,6 +14,28 @@ from datetime import datetime, timezone
 
 from agent import run_agent_stream
 from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api
+from action_ledger import ensure_action_ledger, list_actions
+from policy import ensure_policy, load_policy
+from snapshots import create_snapshot, list_snapshots, restore_snapshot
+from search import SearchIndexer
+from model_registry import list_models, get_model, get_default_model
+from personas import (
+    ensure_personas,
+    list_personas,
+    get_persona,
+    create_persona,
+    update_persona,
+    delete_persona,
+    set_active_persona,
+    get_active_persona,
+)
+from deployment_config import (
+    ensure_deployment_config,
+    get_deployment_status,
+    set_deployment_mode,
+    enable_federation,
+    disable_federation,
+)
 
 app = FastAPI(title="Nexus.computer API")
 
@@ -33,6 +55,11 @@ ACCOUNT_FILE = os.path.join(DATA_DIR, "account.json")
 SESSIONS_FILE = os.path.join(DATA_DIR, "sessions.json")
 PLUGINS_FILE = os.path.join(DATA_DIR, "plugins.json")
 REQUESTS_FILE = os.path.join(DATA_DIR, "feature-requests.json")
+ensure_policy(WORKSPACE)
+ensure_action_ledger(WORKSPACE)
+ensure_deployment_config(WORKSPACE)
+ensure_personas(WORKSPACE)
+SEARCH_INDEXER = SearchIndexer(WORKSPACE)
 
 
 class ChatMessage(BaseModel):
@@ -43,11 +70,18 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     search: str | None = None
+    session_id: str | None = None
+    model_id: str | None = "nexus-ai"
+    persona_id: str | None = None
 
 
 class FileWriteRequest(BaseModel):
     path: str
     content: str
+
+
+class SnapshotCreate(BaseModel):
+    label: str = ""
 
 
 class FeatureRequestCreate(BaseModel):
@@ -77,6 +111,18 @@ class PluginUpdate(BaseModel):
     source_url: str | None = None
     description: str | None = None
     entrypoint: str | None = None
+
+
+class PersonaCreate(BaseModel):
+    name: str
+    description: str = ""
+    system_prompt: str
+
+
+class PersonaUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    system_prompt: str | None = None
 
 
 def _now() -> str:
@@ -212,6 +258,22 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize search index on startup."""
+    try:
+        status = SEARCH_INDEXER.get_status()
+        if status["indexed_files"] == 0:
+            # First run: build index in background (don't block startup)
+            import threading
+            threading.Thread(
+                target=lambda: SEARCH_INDEXER.rebuild_from_workspace(),
+                daemon=True
+            ).start()
+    except Exception as e:
+        print(f"Search index initialization failed: {e}")
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "online", "workspace": WORKSPACE}
@@ -227,7 +289,7 @@ async def meta():
     active_session = _find_session(sessions, sessions.get("active_session_id", ""))
     return {
         "name": "Nexus.computer",
-        "model": os.environ.get("NEXUS_MODEL", "claude-sonnet-4-6"),
+        "model": os.environ.get("NEXUS_MODEL", "nexus-ai"),
         "workspace": WORKSPACE,
         "account_name": account.get("name", "Nexus Operator"),
         "active_session_label": active_session.get("label") if active_session else None,
@@ -383,17 +445,72 @@ async def uninstall_plugin(plugin_id: str):
     return {"status": "deleted"}
 
 
-@app.get("/api/search")
-async def search(q: str, path: str = ""):
-    if not q.strip():
-        raise HTTPException(status_code=400, detail="q cannot be empty")
-    return search_files_api(WORKSPACE, q, path)
-
-
 @app.get("/api/feature-requests")
 async def list_feature_requests():
     items = _load_feature_requests()
     return {"items": _sorted_feature_requests(items)}
+
+
+@app.get("/api/actions")
+async def get_actions(limit: int = 100, offset: int = 0):
+    return list_actions(WORKSPACE, limit=limit, offset=offset)
+
+
+@app.get("/api/policy")
+async def get_policy():
+    return load_policy(WORKSPACE)
+
+
+@app.get("/api/snapshots")
+async def get_snapshots():
+    return list_snapshots(WORKSPACE)
+
+
+@app.post("/api/snapshots")
+async def make_snapshot(body: SnapshotCreate):
+    item = create_snapshot(WORKSPACE, label=body.label)
+    return {"snapshot": item}
+
+
+@app.post("/api/snapshots/{snapshot_id}/restore")
+async def restore_snapshot_by_id(snapshot_id: str):
+    try:
+        return restore_snapshot(WORKSPACE, snapshot_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/deployment")
+async def get_deployment():
+    """Get current deployment status."""
+    return get_deployment_status(WORKSPACE)
+
+
+class DeploymentModeUpdate(BaseModel):
+    mode: Literal["standalone", "hub-integrated"]
+
+
+@app.post("/api/deployment/mode")
+async def update_deployment_mode(body: DeploymentModeUpdate):
+    """Set the deployment mode."""
+    try:
+        return set_deployment_mode(WORKSPACE, body.mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class FederationConfig(BaseModel):
+    enabled: bool
+    node_id: str | None = None
+
+
+@app.post("/api/deployment/federation")
+async def configure_federation(body: FederationConfig):
+    """Enable or disable federation."""
+    if body.enabled:
+        return enable_federation(WORKSPACE, body.node_id)
+    else:
+        return disable_federation(WORKSPACE)
 
 
 @app.post("/api/feature-requests")
@@ -444,11 +561,82 @@ async def chat(body: ChatRequest):
         ]
     else:
         augmented = body.messages
+
+    sessions = _load_sessions()
+    session_id = body.session_id or sessions.get("active_session_id")
+
     return StreamingResponse(
-        run_agent_stream([m.model_dump() for m in augmented], WORKSPACE),
+        run_agent_stream(
+            [m.model_dump() for m in augmented],
+            WORKSPACE,
+            session_id=session_id,
+            model_id=body.model_id,
+            persona_id=body.persona_id,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/personas")
+async def get_personas():
+    data = list_personas(WORKSPACE)
+    active = get_active_persona(WORKSPACE)
+    return {
+        "active_persona_id": data.get("active_persona_id"),
+        "active": active,
+        "items": data.get("items", []),
+    }
+
+
+@app.get("/api/personas/{persona_id}")
+async def get_persona_details(persona_id: str):
+    persona = get_persona(WORKSPACE, persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="persona not found")
+    return persona
+
+
+@app.post("/api/personas")
+async def create_persona_item(body: PersonaCreate):
+    if len(body.name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="name must be at least 2 characters")
+    if len(body.system_prompt.strip()) < 10:
+        raise HTTPException(status_code=400, detail="system_prompt must be at least 10 characters")
+    return create_persona(WORKSPACE, body.name, body.description, body.system_prompt)
+
+
+@app.put("/api/personas/{persona_id}")
+async def update_persona_item(persona_id: str, body: PersonaUpdate):
+    try:
+        return update_persona(WORKSPACE, persona_id, body.name, body.description, body.system_prompt)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/personas/{persona_id}")
+async def delete_persona_item(persona_id: str):
+    try:
+        delete_persona(WORKSPACE, persona_id)
+        return {"status": "deleted", "persona_id": persona_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/personas/{persona_id}/activate")
+async def activate_persona_item(persona_id: str):
+    try:
+        data = set_active_persona(WORKSPACE, persona_id)
+        active = get_active_persona(WORKSPACE)
+        return {
+            "status": "ok",
+            "active_persona_id": data.get("active_persona_id"),
+            "active": active,
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/api/files")
@@ -463,12 +651,68 @@ async def read_file(path: str):
 
 @app.post("/api/files/write")
 async def write_file(body: FileWriteRequest):
-    return write_file_api(WORKSPACE, body.path, body.content)
+    result = write_file_api(WORKSPACE, body.path, body.content)
+    # Update search index
+    try:
+        filepath = os.path.join(WORKSPACE, body.path)
+        SEARCH_INDEXER.index_file(filepath, body.content)
+    except Exception:
+        pass  # Index update failure shouldn't block file write
+    return result
 
 
 @app.delete("/api/files")
 async def delete_file(path: str):
-    return delete_file_api(WORKSPACE, path)
+    result = delete_file_api(WORKSPACE, path)
+    # Update search index
+    try:
+        filepath = os.path.join(WORKSPACE, path)
+        SEARCH_INDEXER.remove_file(filepath)
+    except Exception:
+        pass  # Index update failure shouldn't block file delete
+    return result
+
+
+@app.get("/api/search")
+async def search_files(q: str, limit: int = 20):
+    """Full-text search across workspace files."""
+    if not q or len(q.strip()) < 2:
+        return {"results": [], "query": q}
+    
+    results = SEARCH_INDEXER.search(q, limit)
+    return {"results": results, "query": q, "count": len(results)}
+
+
+@app.post("/api/search/rebuild")
+async def rebuild_search_index():
+    """Rebuild search index from scratch."""
+    SEARCH_INDEXER.rebuild_from_workspace()
+    return {"status": "index rebuilt", "info": SEARCH_INDEXER.get_status()}
+
+
+@app.get("/api/search/status")
+async def get_search_status():
+    """Get search index status."""
+    return SEARCH_INDEXER.get_status()
+
+
+@app.get("/api/models")
+async def get_models():
+    """Get list of available models with capabilities."""
+    models = list_models()
+    return {
+        "models": [model.to_dict() for model in models],
+        "default": get_default_model().id,
+    }
+
+
+@app.get("/api/models/{model_id}")
+async def get_model_details(model_id: str):
+    """Get details about a specific model."""
+    model = get_model(model_id)
+    if not model:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+    return model.to_dict()
 
 
 # Serve built frontend — checked at startup

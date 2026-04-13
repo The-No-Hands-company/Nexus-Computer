@@ -28,6 +28,13 @@ const ChevronIcon = ({ open }) => (
   </svg>
 )
 
+const SearchIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="11" cy="11" r="8"/>
+    <path d="m21 21-4.35-4.35"/>
+  </svg>
+)
+
 /* ── helpers ── */
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes}B`
@@ -79,6 +86,50 @@ const S = {
     transition: 'color 0.15s',
     display: 'flex',
     alignItems: 'center',
+  },
+  searchBar: {
+    padding: '6px 8px',
+    borderBottom: '1px solid var(--border-dim)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    background: 'rgba(255,255,255,0.02)',
+  },
+  searchInput: {
+    flex: 1,
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid var(--border-dim)',
+    borderRadius: '6px',
+    padding: '6px 8px',
+    color: 'var(--text)',
+    fontSize: '11px',
+    fontFamily: 'monospace',
+  },
+  searchResults: {
+    padding: '6px 0',
+  },
+  searchResult: (selected) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '6px 12px',
+    cursor: 'pointer',
+    background: selected ? 'rgba(0,217,255,0.06)' : 'transparent',
+    borderLeft: selected ? '2px solid var(--accent)' : '2px solid transparent',
+    transition: 'background 0.1s',
+    fontSize: '11px',
+  }),
+  searchResultName: {
+    flex: 1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'var(--text)',
+  },
+  searchResultScore: {
+    color: 'var(--text-dim)',
+    fontSize: '9px',
+    flexShrink: 0,
   },
   tree: {
     flex: 1,
@@ -223,6 +274,9 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
   const [fileContent, setFileContent] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
 
   const loadRoot = useCallback(async () => {
     setLoading(true)
@@ -240,6 +294,33 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
   }, [])
 
   useEffect(() => { loadRoot() }, [loadRoot, refreshKey])
+
+  const handleSearch = useCallback(async (query) => {
+    setSearchQuery(query)
+    if (!query || query.length < 2) {
+      setSearchResults([])
+      return
+    }
+    setSearching(true)
+    try {
+      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=50`)
+      if (!res.ok) throw new Error('Search failed')
+      const data = await res.json()
+      setSearchResults(data.results || [])
+    } catch (e) {
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(
+      () => handleSearch(searchQuery),
+      200,  // Debounce search by 200ms
+    )
+    return () => clearTimeout(timer)
+  }, [searchQuery, handleSearch])
 
   const handleSelect = useCallback(async (item) => {
     onFileSelect(item)
@@ -277,25 +358,74 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
         </button>
       </div>
 
-      <div style={S.summary}>
-        <span>{counts.files} files</span>
-        <span>{counts.dirs} folders</span>
+      <div style={S.searchBar}>
+        <SearchIcon />
+        <input
+          type="text"
+          placeholder="Search files..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          style={S.searchInput}
+        />
       </div>
 
+      {searchQuery && searchResults.length === 0 && !searching && (
+        <div style={S.summary}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>No results</span>
+        </div>
+      )}
+
+      {!searchQuery && (
+        <div style={S.summary}>
+          <span>{counts.files} files</span>
+          <span>{counts.dirs} folders</span>
+        </div>
+      )}
+
       <div style={S.tree}>
-        {loading && <div style={S.empty}>Loading...</div>}
-        {!loading && error && <div style={S.empty}>Could not load workspace.<br />{error}</div>}
-        {!loading && !error && items.length === 0 && (
-          <div style={S.empty}>Workspace is empty.<br />Ask Nexus to create something.</div>
+        {searchQuery ? (
+          // Search results view
+          <>
+            {searching && <div style={S.empty}>Searching...</div>}
+            {!searching && searchResults.length === 0 && (
+              <div style={S.empty}>No files found matching "{searchQuery}"</div>
+            )}
+            {!searching && searchResults.length > 0 && (
+              <div style={S.searchResults}>
+                {searchResults.map(result => (
+                  <div
+                    key={result.file}
+                    style={S.searchResult(selectedFile?.path === result.file)}
+                    onClick={() => handleSelect({ path: result.file, name: result.file.split('/').pop(), is_dir: false })}
+                    onMouseEnter={e => !selectedFile && (e.currentTarget.style.background = 'rgba(255,255,255,0.03)')}
+                    onMouseLeave={e => !selectedFile && (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ color: extColor(result.file), flexShrink: 0 }}><FileIcon /></span>
+                    <span style={S.searchResultName}>{result.file}</span>
+                    <span style={S.searchResultScore}>{result.score.toFixed(1)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          // Tree view
+          <>
+            {loading && <div style={S.empty}>Loading...</div>}
+            {!loading && error && <div style={S.empty}>Could not load workspace.<br />{error}</div>}
+            {!loading && !error && items.length === 0 && (
+              <div style={S.empty}>Workspace is empty.<br />Ask Nexus to create something.</div>
+            )}
+            {items.map(item => (
+              <TreeItem
+                key={item.path}
+                item={item}
+                selectedFile={selectedFile}
+                onSelect={handleSelect}
+              />
+            ))}
+          </>
         )}
-        {items.map(item => (
-          <TreeItem
-            key={item.path}
-            item={item}
-            selectedFile={selectedFile}
-            onSelect={handleSelect}
-          />
-        ))}
       </div>
 
       {selectedFile && !selectedFile.is_dir && fileContent !== null && (

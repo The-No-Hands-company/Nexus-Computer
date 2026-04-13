@@ -21,6 +21,10 @@ free as in freedom, open source, private by default, and never paywalled.
 - Free software, forever
 - Private by default
 
+## Nexus Systems way
+
+Execution blueprint: see NEXUS_SYSTEMS_WAY.md for product principles, architecture direction, and sprint-level implementation guidance.
+
 ## Stack
 
 - Backend: FastAPI + Anthropic SDK

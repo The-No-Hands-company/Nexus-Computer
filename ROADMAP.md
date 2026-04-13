@@ -7,10 +7,11 @@ Nexus is not trying to merely match Zo Computer. The goal is to become the prefe
 - Free as in freedom and free as in price
 - Open source from the start
 - Private by default
-- Self-hostable and portable
+- Self-hostable and portable as a standalone instance or integrated into Nexus Cloud
 - No ads, no subscriptions, no paywalls
 - Built for real work, not platform lock-in
 - Community-driven: if people ask for useful features, we build them
+- Nexus AI is the default intelligence layer for Nexus Computer
 
 ## What Zo already does well
 
@@ -201,6 +202,7 @@ Nexus wins when users can say:
 6. Improve terminal and service orchestration
 7. Add import tools for Zo-style workflows
 8. Add community submission workflow for feature requests
+9. Implement deployment modes (standalone vs hub-integrated) and federation configuration
 
 ## Non-negotiables
 

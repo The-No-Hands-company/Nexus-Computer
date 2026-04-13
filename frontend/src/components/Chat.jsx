@@ -278,6 +278,29 @@ const S = {
     letterSpacing: '0.08em',
     textTransform: 'uppercase',
   },
+  header: {
+    padding: '8px 20px',
+    backgroundColor: 'var(--bg-2)',
+    borderBottom: '1px solid var(--border)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+  },
+  headerControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  },
+  modelSelector: {
+    padding: '6px 10px',
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    borderRadius: '6px',
+    color: 'var(--text)',
+    fontSize: '11px',
+    cursor: 'pointer',
+  },
 }
 
 const QUICK_PROMPTS = [
@@ -349,6 +372,10 @@ export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
   const [streaming, setStreaming] = useState(false)
   const [search, setSearch] = useState('')
   const [meta, setMeta] = useState(null)
+  const [models, setModels] = useState([])
+  const [selectedModel, setSelectedModel] = useState('nexus-ai')
+  const [personas, setPersonas] = useState([])
+  const [selectedPersona, setSelectedPersona] = useState('')
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
 
@@ -373,6 +400,26 @@ export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
       .then(r => r.json())
       .then(setMeta)
       .catch(() => setMeta(null))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/models')
+      .then(r => r.json())
+      .then(data => {
+        setModels(data.models || [])
+        setSelectedModel(data.default || 'nexus-ai')
+      })
+      .catch(() => setModels([]))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/personas')
+      .then(r => r.json())
+      .then(data => {
+        setPersonas(data.items || [])
+        setSelectedPersona(data.active_persona_id || '')
+      })
+      .catch(() => setPersonas([]))
   }, [])
 
   const buildApiMessages = useCallback((msgs) => {
@@ -403,7 +450,12 @@ export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify({ messages: buildApiMessages(newMessages), search: search.trim() || null }),
+        body: JSON.stringify({
+          messages: buildApiMessages(newMessages),
+          search: search.trim() || null,
+          model_id: selectedModel,
+          persona_id: selectedPersona || null,
+        }),
       })
 
       if (!response.ok || !response.body) {
@@ -458,7 +510,7 @@ export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
     } finally {
       setStreaming(false)
     }
-  }, [messages, streaming, buildApiMessages, onFsChange, search])
+  }, [messages, streaming, buildApiMessages, onFsChange, search, selectedModel, selectedPersona])
 
   const handleKey = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -477,6 +529,43 @@ export default function Chat({ selectedFile, onFsChange, onOpenPalette }) {
 
   return (
     <div style={S.panel}>
+      {(models.length > 0 || personas.length > 0) && (
+        <div style={S.header}>
+          <div style={{ fontSize: '10px', letterSpacing: '0.08em', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+            Runtime
+          </div>
+          <div style={S.headerControls}>
+            {models.length > 0 && (
+              <select
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+                style={S.modelSelector}
+                title="Select model"
+              >
+                {models.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {`Model: ${m.name}`}
+                  </option>
+                ))}
+              </select>
+            )}
+            {personas.length > 0 && (
+              <select
+                value={selectedPersona}
+                onChange={e => setSelectedPersona(e.target.value)}
+                style={S.modelSelector}
+                title="Select persona"
+              >
+                {personas.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {`Persona: ${p.name}`}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+      )}
       <div style={S.messages}>
         {isEmpty ? (
           <div style={S.welcome}>
