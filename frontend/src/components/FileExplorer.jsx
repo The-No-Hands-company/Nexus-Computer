@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 /* ── icons ── */
 const FolderIcon = () => (
@@ -32,6 +32,22 @@ const SearchIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="11" cy="11" r="8"/>
     <path d="m21 21-4.35-4.35"/>
+  </svg>
+)
+
+const UploadIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="17 8 12 3 7 8"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+)
+
+const DownloadIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="15" x2="12" y2="3"/>
   </svg>
 )
 
@@ -277,6 +293,8 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState(null) // null | 'uploading' | 'done' | 'error'
+  const uploadRef = useRef(null)
 
   const loadRoot = useCallback(async () => {
     setLoading(true)
@@ -336,6 +354,30 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
     }
   }, [onFileSelect])
 
+  const handleUpload = useCallback(async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (!files.length) return
+    setUploadStatus('uploading')
+    try {
+      await Promise.all(files.map(file => {
+        const fd = new FormData()
+        fd.append('path', '')
+        fd.append('file', file)
+        return fetch('/api/files/upload', { method: 'POST', body: fd }).then(r => {
+          if (!r.ok) throw new Error(`Upload failed (${r.status})`)
+        })
+      }))
+      setUploadStatus('done')
+      loadRoot()
+      setTimeout(() => setUploadStatus(null), 2000)
+    } catch {
+      setUploadStatus('error')
+      setTimeout(() => setUploadStatus(null), 3000)
+    }
+    // Reset input so same file can be re-uploaded
+    if (uploadRef.current) uploadRef.current.value = ''
+  }, [loadRoot])
+
   const counts = items.reduce((acc, item) => {
     acc.total += 1
     if (item.is_dir) acc.dirs += 1
@@ -347,15 +389,42 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
     <div style={S.panel}>
       <div style={S.panelHeader}>
         <span>Workspace</span>
-        <button
-          style={S.refreshBtn}
-          onClick={loadRoot}
-          title="Refresh"
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
-        >
-          <RefreshIcon />
-        </button>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          {uploadStatus === 'uploading' && (
+            <span style={{ fontSize: '9px', color: 'var(--accent)', letterSpacing: '0.06em' }}>uploading…</span>
+          )}
+          {uploadStatus === 'done' && (
+            <span style={{ fontSize: '9px', color: 'var(--green)', letterSpacing: '0.06em' }}>uploaded</span>
+          )}
+          {uploadStatus === 'error' && (
+            <span style={{ fontSize: '9px', color: 'var(--red)', letterSpacing: '0.06em' }}>error</span>
+          )}
+          <button
+            style={S.refreshBtn}
+            onClick={() => uploadRef.current?.click()}
+            title="Upload file(s)"
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+          >
+            <UploadIcon />
+          </button>
+          <input
+            ref={uploadRef}
+            type="file"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleUpload}
+          />
+          <button
+            style={S.refreshBtn}
+            onClick={loadRoot}
+            title="Refresh"
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
+          >
+            <RefreshIcon />
+          </button>
+        </div>
       </div>
 
       <div style={S.searchBar}>
@@ -432,8 +501,20 @@ export default function FileExplorer({ refreshKey, onFileSelect, selectedFile })
         <div style={S.viewer}>
           <div style={S.viewerHeader}>
             <span style={{ color: extColor(selectedFile.name) }}>{selectedFile.name}</span>
-            <span style={{ cursor: 'pointer', color: 'var(--text-muted)' }}
-              onClick={() => { setFileContent(null); onFileSelect(null) }}>✕</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <a
+                href={`/api/files/download?path=${encodeURIComponent(selectedFile.path)}`}
+                download
+                title="Download file"
+                style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--accent)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'var(--text-muted)'}
+              >
+                <DownloadIcon />
+              </a>
+              <span style={{ cursor: 'pointer', color: 'var(--text-muted)' }}
+                onClick={() => { setFileContent(null); onFileSelect(null) }}>✕</span>
+            </div>
           </div>
           <div style={S.viewerContent}>{fileContent}</div>
         </div>

@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from typing import Literal
 import hmac
@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 from agent import run_agent_stream
-from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api
+from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api, _safe
 from action_ledger import ensure_action_ledger, list_actions, append_action
 from policy import ensure_policy, load_policy
 from snapshots import create_snapshot, list_snapshots, restore_snapshot
@@ -792,6 +792,60 @@ async def delete_file(path: str):
     except Exception:
         pass  # Index update failure shouldn't block file delete
     return result
+
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+@app.post("/api/files/upload")
+async def upload_file(path: str = Form(""), file: UploadFile = File(...)):
+    """Upload a file into the workspace at the given directory path."""
+    filename = os.path.basename(file.filename or "")
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename required")
+    # Reject traversal attempts hidden in the filename itself
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    dest_dir = _safe(WORKSPACE, path if path else "")
+    if not os.path.isdir(dest_dir):
+        raise HTTPException(status_code=400, detail="destination path is not a directory")
+
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="file exceeds 50 MB limit")
+
+    dest_path = os.path.join(dest_dir, filename)
+    with open(dest_path, "wb") as fh:
+        fh.write(content)
+
+    rel_path = os.path.relpath(dest_path, WORKSPACE).replace(os.sep, "/")
+    # Best-effort text indexing
+    try:
+        SEARCH_INDEXER.index_file(dest_path, content.decode("utf-8"))
+    except Exception:
+        pass
+
+    append_action(WORKSPACE, {
+        "event_type": "file_upload",
+        "result_preview": rel_path,
+    })
+    return {"path": rel_path, "size": len(content), "filename": filename}
+
+
+@app.get("/api/files/download")
+async def download_file(path: str):
+    """Download a single file from the workspace."""
+    full_path = _safe(WORKSPACE, path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="file not found")
+    if os.path.isdir(full_path):
+        raise HTTPException(status_code=400, detail="cannot download a directory")
+    return FileResponse(
+        full_path,
+        filename=os.path.basename(full_path),
+        media_type="application/octet-stream",
+    )
 
 
 @app.get("/api/search")

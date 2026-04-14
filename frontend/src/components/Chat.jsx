@@ -137,7 +137,7 @@ const S = {
     color: 'var(--text)',
     fontSize: '13px',
     lineHeight: 1.7,
-    whiteSpace: 'pre-wrap',
+    whiteSpace: role === 'user' ? 'pre-wrap' : 'normal',
     wordBreak: 'break-word',
   }),
   toolBlock: (type) => ({
@@ -310,6 +310,144 @@ const QUICK_PROMPTS = [
   'Set up a simple web server',
 ]
 
+/* ── Markdown rendering ── */
+
+const MD_STYLES = {
+  pre: {
+    background: 'var(--bg-3)',
+    border: '1px solid var(--border)',
+    borderRadius: '6px',
+    padding: '10px 12px',
+    margin: '6px 0',
+    overflowX: 'auto',
+    fontSize: '11px',
+    lineHeight: 1.6,
+    fontFamily: 'var(--font-mono)',
+    color: 'var(--text)',
+  },
+  langLabel: {
+    fontSize: '9px',
+    color: 'var(--text-muted)',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    marginBottom: '6px',
+  },
+  inlineCode: {
+    background: 'rgba(255,255,255,0.08)',
+    border: '1px solid var(--border)',
+    borderRadius: '3px',
+    padding: '1px 5px',
+    fontFamily: 'var(--font-mono)',
+    fontSize: '11px',
+    color: 'var(--amber)',
+  },
+  h1: { fontSize: '16px', fontWeight: 700, color: 'var(--text)', margin: '10px 0 4px' },
+  h2: { fontSize: '14px', fontWeight: 700, color: 'var(--text)', margin: '8px 0 3px' },
+  h3: { fontSize: '13px', fontWeight: 700, color: 'var(--accent-dim)', margin: '6px 0 2px' },
+  ul: { paddingLeft: '18px', margin: '4px 0' },
+  ol: { paddingLeft: '18px', margin: '4px 0' },
+  li: { marginBottom: '2px', lineHeight: 1.6 },
+  p: { margin: '3px 0', lineHeight: 1.7 },
+  a: { color: 'var(--accent)', textDecoration: 'underline' },
+}
+
+function renderInline(text, keyPrefix = '') {
+  const pattern = /(`[^`\n]+`)|(\*\*([^*]+)\*\*)|(\*([^*\n]+)\*)|(\[([^\]]+)\]\((https?:\/\/[^)]+)\))/g
+  const parts = []
+  let last = 0
+  let m
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[1]) {
+      parts.push(<code key={`${keyPrefix}${m.index}`} style={MD_STYLES.inlineCode}>{m[1].slice(1, -1)}</code>)
+    } else if (m[2]) {
+      parts.push(<strong key={`${keyPrefix}${m.index}`}>{m[3]}</strong>)
+    } else if (m[4]) {
+      parts.push(<em key={`${keyPrefix}${m.index}`}>{m[5]}</em>)
+    } else if (m[6]) {
+      parts.push(<a key={`${keyPrefix}${m.index}`} href={m[8]} target="_blank" rel="noopener noreferrer" style={MD_STYLES.a}>{m[7]}</a>)
+    }
+    last = pattern.lastIndex
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts
+}
+
+function MarkdownBubble({ text }) {
+  // Split on fenced code blocks first
+  const segments = text.split(/(```[\s\S]*?```)/g)
+
+  const blocks = []
+  segments.forEach((seg, si) => {
+    if (seg.startsWith('```')) {
+      const inner = seg.slice(3, -3)
+      const nl = inner.indexOf('\n')
+      const lang = nl > -1 ? inner.slice(0, nl).trim() : ''
+      const code = nl > -1 ? inner.slice(nl + 1) : inner
+      blocks.push(
+        <pre key={`cb${si}`} style={MD_STYLES.pre}>
+          {lang && <div style={MD_STYLES.langLabel}>{lang}</div>}
+          <code>{code.replace(/\n$/, '')}</code>
+        </pre>
+      )
+      return
+    }
+
+    // Process regular text line by line
+    const lines = seg.split('\n')
+    let ulItems = null
+    let olItems = null
+
+    const flush = (key) => {
+      if (ulItems) {
+        blocks.push(<ul key={`ul${key}`} style={MD_STYLES.ul}>{ulItems.map((c, j) => <li key={j} style={MD_STYLES.li}>{c}</li>)}</ul>)
+        ulItems = null
+      }
+      if (olItems) {
+        blocks.push(<ol key={`ol${key}`} style={MD_STYLES.ol}>{olItems.map((c, j) => <li key={j} style={MD_STYLES.li}>{c}</li>)}</ol>)
+        olItems = null
+      }
+    }
+
+    lines.forEach((line, li) => {
+      const key = `${si}-${li}`
+      const h1 = line.match(/^# (.+)/)
+      const h2 = line.match(/^## (.+)/)
+      const h3 = line.match(/^### (.+)/)
+      const ul = line.match(/^[\-\*] (.+)/)
+      const ol = line.match(/^\d+\. (.+)/)
+
+      if (h3) { flush(key); blocks.push(<div key={key} style={MD_STYLES.h3}>{renderInline(h3[1], key)}</div>); return }
+      if (h2) { flush(key); blocks.push(<div key={key} style={MD_STYLES.h2}>{renderInline(h2[1], key)}</div>); return }
+      if (h1) { flush(key); blocks.push(<div key={key} style={MD_STYLES.h1}>{renderInline(h1[1], key)}</div>); return }
+
+      if (ul) {
+        if (olItems) flush(key)
+        if (!ulItems) ulItems = []
+        ulItems.push(renderInline(ul[1], key))
+        return
+      }
+      if (ol) {
+        if (ulItems) flush(key)
+        if (!olItems) olItems = []
+        olItems.push(renderInline(ol[1], key))
+        return
+      }
+
+      flush(key)
+
+      if (line.trim()) {
+        blocks.push(<p key={key} style={MD_STYLES.p}>{renderInline(line, key)}</p>)
+      } else if (li > 0 && li < lines.length - 1) {
+        blocks.push(<div key={key} style={{ height: '4px' }} />)
+      }
+    })
+    flush(`${si}-end`)
+  })
+
+  return <div>{blocks}</div>
+}
+
 /* ── Thinking dots ── */
 function ThinkingDots() {
   return (
@@ -360,7 +498,11 @@ function Message({ msg }) {
       <div style={S.msgRole(msg.role)}>
         {msg.role === 'user' ? 'You' : 'Nexus'}
       </div>
-      <div style={S.msgBubble(msg.role)}>{msg.content}</div>
+      <div style={S.msgBubble(msg.role)}>
+        {msg.role === 'assistant'
+          ? <MarkdownBubble text={msg.content} />
+          : msg.content}
+      </div>
     </div>
   )
 }
