@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Literal
+import hmac
+import hashlib
 import json
 import os
 import platform
@@ -14,11 +16,29 @@ from datetime import datetime, timezone
 
 from agent import run_agent_stream
 from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api
-from action_ledger import ensure_action_ledger, list_actions
+from action_ledger import ensure_action_ledger, list_actions, append_action
 from policy import ensure_policy, load_policy
 from snapshots import create_snapshot, list_snapshots, restore_snapshot
 from search import SearchIndexer
 from model_registry import list_models, get_model, get_default_model
+from service_manager import (
+    ensure_services_store,
+    load_services,
+    create_service,
+    update_service,
+    delete_service,
+    read_service_logs,
+    HostedServiceManager,
+)
+from automation import (
+    ensure_automation_store,
+    load_jobs,
+    create_job,
+    update_job,
+    delete_job,
+    list_logs,
+    AutomationScheduler,
+)
 from personas import (
     ensure_personas,
     list_personas,
@@ -35,6 +55,16 @@ from deployment_config import (
     set_deployment_mode,
     enable_federation,
     disable_federation,
+)
+from cloud_registry import (
+    ensure_cloud_registry,
+    get_well_known,
+    get_discovery,
+    get_node_secret,
+    register_hub,
+    list_registrations,
+    deregister_hub,
+    rotate_hub_token,
 )
 
 app = FastAPI(title="Nexus.computer API")
@@ -59,7 +89,12 @@ ensure_policy(WORKSPACE)
 ensure_action_ledger(WORKSPACE)
 ensure_deployment_config(WORKSPACE)
 ensure_personas(WORKSPACE)
+ensure_automation_store(WORKSPACE)
+ensure_services_store(WORKSPACE)
+ensure_cloud_registry(WORKSPACE)
 SEARCH_INDEXER = SearchIndexer(WORKSPACE)
+AUTOMATION = AutomationScheduler(WORKSPACE)
+SERVICES = HostedServiceManager(WORKSPACE)
 
 
 class ChatMessage(BaseModel):
@@ -123,6 +158,70 @@ class PersonaUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     system_prompt: str | None = None
+
+
+class AutomationJobCreate(BaseModel):
+    name: str
+    command: str
+    interval_seconds: int = 300
+    enabled: bool = True
+
+
+class AutomationJobUpdate(BaseModel):
+    name: str | None = None
+    command: str | None = None
+    interval_seconds: int | None = None
+    enabled: bool | None = None
+
+
+class HostedServiceCreate(BaseModel):
+    name: str
+    command: str
+    port: int | None = None
+    cwd: str = ""
+    autostart: bool = False
+    probe_path: str = "/"
+    expected_status: int = 200
+    probe_interval_seconds: int = 30
+    probe_timeout_seconds: int = 2
+
+
+class HostedServiceUpdate(BaseModel):
+    name: str | None = None
+    command: str | None = None
+    port: int | None = None
+    cwd: str | None = None
+    autostart: bool | None = None
+    probe_path: str | None = None
+    expected_status: int | None = None
+    probe_interval_seconds: int | None = None
+    probe_timeout_seconds: int | None = None
+
+
+class CloudRegistrationRequest(BaseModel):
+    hub_id: str
+    hub_url: str
+    node_token: str
+    label: str = ""
+
+
+class CloudTokenRotateRequest(BaseModel):
+    node_token: str
+    rotated_by: str = "local_operator"
+
+
+class CloudTokenRotateByHubRequest(BaseModel):
+    hub_id: str
+    node_token: str
+    rotated_by: str = "hub_callback"
+
+
+class CloudManualRegistrationRequest(BaseModel):
+    hub_id: str
+    hub_url: str
+    node_token: str
+    label: str = ""
+    rotated_by: str = "local_operator"
 
 
 def _now() -> str:
@@ -272,6 +371,28 @@ async def startup_event():
             ).start()
     except Exception as e:
         print(f"Search index initialization failed: {e}")
+
+    try:
+        AUTOMATION.start()
+    except Exception as e:
+        print(f"Automation scheduler failed to start: {e}")
+
+    try:
+        SERVICES.autostart()
+    except Exception as e:
+        print(f"Hosted service autostart failed: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    try:
+        AUTOMATION.stop()
+    except Exception:
+        pass
+    try:
+        SERVICES.stop_all()
+    except Exception:
+        pass
 
 
 @app.get("/api/health")
@@ -715,7 +836,351 @@ async def get_model_details(model_id: str):
     return model.to_dict()
 
 
-# Serve built frontend — checked at startup
+@app.get("/api/automation/jobs")
+async def get_automation_jobs():
+    data = load_jobs(WORKSPACE)
+    return {"items": data.get("items", [])}
+
+
+@app.post("/api/automation/jobs")
+async def create_automation_job(body: AutomationJobCreate):
+    if len(body.name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="name must be at least 2 characters")
+    if len(body.command.strip()) < 1:
+        raise HTTPException(status_code=400, detail="command cannot be empty")
+    item = create_job(
+        WORKSPACE,
+        name=body.name,
+        command=body.command,
+        interval_seconds=body.interval_seconds,
+        enabled=body.enabled,
+    )
+    return item
+
+
+@app.post("/api/automation/jobs/{job_id}")
+async def update_automation_job(job_id: str, body: AutomationJobUpdate):
+    try:
+        return update_job(
+            WORKSPACE,
+            job_id,
+            name=body.name,
+            command=body.command,
+            interval_seconds=body.interval_seconds,
+            enabled=body.enabled,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/automation/jobs/{job_id}")
+async def delete_automation_job(job_id: str):
+    try:
+        delete_job(WORKSPACE, job_id)
+        return {"status": "deleted", "job_id": job_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/automation/jobs/{job_id}/run")
+async def run_automation_job_now(job_id: str):
+    try:
+        return AUTOMATION.run_now(job_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/api/automation/logs")
+async def get_automation_logs(limit: int = 100):
+    return {"items": list_logs(WORKSPACE, limit=limit)}
+
+
+@app.get("/api/services")
+async def get_hosted_services():
+    data = SERVICES.refresh()
+    return {"items": data.get("items", [])}
+
+
+@app.post("/api/services")
+async def create_hosted_service(body: HostedServiceCreate):
+    if len(body.name.strip()) < 2:
+        raise HTTPException(status_code=400, detail="name must be at least 2 characters")
+    if len(body.command.strip()) < 1:
+        raise HTTPException(status_code=400, detail="command cannot be empty")
+    item = create_service(
+        WORKSPACE,
+        name=body.name,
+        command=body.command,
+        port=body.port,
+        cwd=body.cwd,
+        autostart=body.autostart,
+        probe_path=body.probe_path,
+        expected_status=body.expected_status,
+        probe_interval_seconds=body.probe_interval_seconds,
+        probe_timeout_seconds=body.probe_timeout_seconds,
+    )
+    return item
+
+
+@app.post("/api/services/{service_id}")
+async def update_hosted_service(service_id: str, body: HostedServiceUpdate):
+    try:
+        return update_service(
+            WORKSPACE,
+            service_id,
+            name=body.name,
+            command=body.command,
+            port=body.port,
+            cwd=body.cwd,
+            autostart=body.autostart,
+            probe_path=body.probe_path,
+            expected_status=body.expected_status,
+            probe_interval_seconds=body.probe_interval_seconds,
+            probe_timeout_seconds=body.probe_timeout_seconds,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/services/{service_id}")
+async def delete_hosted_service(service_id: str):
+    try:
+        delete_service(WORKSPACE, service_id)
+        return {"status": "deleted", "service_id": service_id}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/services/{service_id}/start")
+async def start_hosted_service(service_id: str):
+    try:
+        return SERVICES.start(service_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/services/{service_id}/stop")
+async def stop_hosted_service(service_id: str):
+    try:
+        return SERVICES.stop(service_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/services/{service_id}/restart")
+async def restart_hosted_service(service_id: str):
+    try:
+        return SERVICES.restart(service_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/services/{service_id}/logs")
+async def get_hosted_service_logs(service_id: str, lines: int = 120):
+    rows = read_service_logs(WORKSPACE, service_id, lines=lines)
+    return {"service_id": service_id, "lines": rows}
+
+
+# ── Cloud node contract endpoints (must register before static mount) ─────────
+
+def _base_url(request: Request) -> str:
+    fwd_proto = request.headers.get("x-forwarded-proto", "")
+    fwd_host = request.headers.get("x-forwarded-host", "")
+    if fwd_proto and fwd_host:
+        return f"{fwd_proto}://{fwd_host}"
+    host = request.headers.get("host", "")
+    scheme = "https" if (fwd_proto == "https" or "443" in host) else "http"
+    return f"{scheme}://{host}" if host else ""
+
+
+def _verify_hub_callback_signature(request: Request, body_bytes: bytes) -> None:
+    ts_header = request.headers.get("x-nexus-ts", "").strip()
+    sig_header = request.headers.get("x-nexus-signature", "").strip()
+    if not ts_header or not sig_header:
+        raise HTTPException(status_code=401, detail="missing hub callback signature")
+    try:
+        ts = int(ts_header)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="invalid hub callback timestamp")
+    now = int(time.time())
+    if abs(now - ts) > 300:
+        raise HTTPException(status_code=401, detail="expired hub callback signature")
+
+    canonical = b"\n".join([
+        request.method.encode("utf-8"),
+        request.url.path.encode("utf-8"),
+        ts_header.encode("utf-8"),
+        body_bytes,
+    ])
+    secret = get_node_secret(WORKSPACE).encode("utf-8")
+    expected = hmac.new(secret, canonical, hashlib.sha256).hexdigest()
+    provided = sig_header.split("=", 1)[-1].lower()
+    if not hmac.compare_digest(expected, provided):
+        raise HTTPException(status_code=401, detail="invalid hub callback signature")
+
+
+@app.get("/.well-known/nexus-cloud", include_in_schema=True)
+async def well_known_nexus_cloud(request: Request):
+    """Nexus Cloud discovery document for hub registration and peer discovery."""
+    return get_well_known(WORKSPACE, base_url=_base_url(request))
+
+
+@app.get("/api/cloud/discovery")
+async def cloud_discovery(request: Request):
+    """Full runtime discovery document with live counters and current registrations."""
+    service_items = SERVICES.refresh().get("items", [])
+    running = sum(1 for s in service_items if s.get("status") == "running")
+    unhealthy = sum(
+        1 for s in service_items
+        if s.get("status") == "running" and s.get("probe_healthy") is False
+    )
+    runtime = {
+        "uptime_seconds": int(time.time() - START_TIME),
+        "service_count": len(service_items),
+        "running_services": running,
+        "unhealthy_services": unhealthy,
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+    }
+    return get_discovery(WORKSPACE, base_url=_base_url(request), runtime=runtime)
+
+
+@app.post("/api/cloud/register")
+async def cloud_register_endpoint(body: CloudRegistrationRequest, request: Request):
+    """
+    Nexusclaw registration endpoint.
+    A hub POSTs here to register/link with this node.  We store a SHA-256
+    hash of the node_token — the raw token is never persisted.
+    """
+    _verify_hub_callback_signature(request, await request.body())
+    try:
+        entry = register_hub(
+            WORKSPACE,
+            hub_id=body.hub_id,
+            hub_url=body.hub_url,
+            node_token=body.node_token,
+            label=body.label,
+            rotated_by="hub_callback",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    append_action(WORKSPACE, {
+        "event_type": "cloud_register",
+        "tool_name": "cloud_register",
+        "hub_id": body.hub_id,
+        "hub_url": body.hub_url,
+        "label": body.label,
+        "result_status": "ok",
+        "rotated_by": "hub_callback",
+        "result_preview": f"registered {body.hub_id} -> {body.hub_url}",
+    })
+    return {
+        "status": "registered",
+        "registration": entry,
+        "node": get_well_known(WORKSPACE, base_url=_base_url(request)),
+    }
+
+
+@app.post("/api/cloud/registrations/manual")
+async def cloud_register_manual_endpoint(body: CloudManualRegistrationRequest, request: Request):
+    """Local operator endpoint for manual hub registration from the Nexus UI."""
+    try:
+        entry = register_hub(
+            WORKSPACE,
+            hub_id=body.hub_id,
+            hub_url=body.hub_url,
+            node_token=body.node_token,
+            label=body.label,
+            rotated_by=body.rotated_by,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    append_action(WORKSPACE, {
+        "event_type": "cloud_register",
+        "tool_name": "cloud_register_manual",
+        "hub_id": body.hub_id,
+        "hub_url": body.hub_url,
+        "label": body.label,
+        "result_status": "ok",
+        "rotated_by": body.rotated_by,
+        "result_preview": f"registered {body.hub_id} -> {body.hub_url}",
+    })
+    return {
+        "status": "registered",
+        "registration": entry,
+        "node": get_well_known(WORKSPACE, base_url=_base_url(request)),
+    }
+
+
+@app.post("/api/cloud/register/rotate")
+async def cloud_rotate_register_endpoint(body: CloudTokenRotateByHubRequest, request: Request):
+    """Compatibility endpoint for hubs rotating an existing registration token."""
+    _verify_hub_callback_signature(request, await request.body())
+    try:
+        entry = rotate_hub_token(WORKSPACE, body.hub_id, body.node_token, body.rotated_by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    append_action(WORKSPACE, {
+        "event_type": "cloud_token_rotate",
+        "tool_name": "cloud_token_rotate",
+        "hub_id": body.hub_id,
+        "result_status": "ok",
+        "rotated_by": body.rotated_by,
+        "result_preview": f"rotated token for {body.hub_id}",
+    })
+    return {"status": "rotated", "registration": entry}
+
+
+@app.get("/api/cloud/registrations")
+async def cloud_list_registrations():
+    """List all hub registrations for this node."""
+    return {"items": list_registrations(WORKSPACE)}
+
+
+@app.delete("/api/cloud/registrations/{hub_id}")
+async def cloud_deregister_endpoint(hub_id: str):
+    """Remove a hub registration from this node."""
+    try:
+        deregister_hub(WORKSPACE, hub_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    append_action(WORKSPACE, {
+        "event_type": "cloud_deregister",
+        "tool_name": "cloud_deregister",
+        "hub_id": hub_id,
+        "result_status": "ok",
+        "result_preview": f"deregistered {hub_id}",
+    })
+    return {"status": "deregistered", "hub_id": hub_id}
+
+
+@app.post("/api/cloud/registrations/{hub_id}/rotate")
+async def cloud_rotate_token(hub_id: str, body: CloudTokenRotateRequest):
+    """Rotate the node_token hash stored for an existing hub registration."""
+    try:
+        entry = rotate_hub_token(WORKSPACE, hub_id, body.node_token, body.rotated_by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    append_action(WORKSPACE, {
+        "event_type": "cloud_token_rotate",
+        "tool_name": "cloud_token_rotate",
+        "hub_id": hub_id,
+        "result_status": "ok",
+        "rotated_by": body.rotated_by,
+        "result_preview": f"rotated token for {hub_id}",
+    })
+    return {"status": "rotated", "registration": entry}
+
+
+# Serve built frontend — must be last; catch-all mount shadows everything after it
 for _dir in ["/app/frontend/dist", "frontend/dist", "../frontend/dist"]:
     if os.path.exists(_dir):
         app.mount("/", StaticFiles(directory=_dir, html=True), name="static")
