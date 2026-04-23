@@ -82,7 +82,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-WORKSPACE = os.environ.get("WORKSPACE_DIR", "/workspace")
+WORKSPACE = os.environ.get(
+    "WORKSPACE_DIR",
+    os.path.join(os.path.expanduser("~"), "nexus-workspace"),
+)
 os.makedirs(WORKSPACE, exist_ok=True)
 set_workspace(WORKSPACE)
 START_TIME = time.time()
