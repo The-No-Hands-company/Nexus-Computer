@@ -40,8 +40,8 @@ export default function Terminal({ active }) {
     // Dynamically import xterm so it doesn't block the app bundle
     const { Terminal: XTerm } = await import('@xterm/xterm')
     const { FitAddon } = await import('@xterm/addon-fit')
-    const { WebLinksAddon } = await import('@xterm/addon-web-links')
-    await import('@xterm/xterm/css/xterm.css')
+    
+    await import('@xterm/xterm/css/xterm.css').catch(() => {})
 
     // Clean up previous instance
     if (termRef.current) {
@@ -88,7 +88,7 @@ export default function Terminal({ active }) {
 
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon())
+    
     termRef.current = term
     fitRef.current = fit
 
