@@ -15,6 +15,11 @@ import SnapshotPanel from './components/SnapshotPanel'
 import ToolsHubPanel from './components/ToolsHubPanel'
 import AutomationPanel from './components/AutomationPanel'
 import HostedServicesPanel from './components/HostedServicesPanel'
+import HomePanel from './components/HomePanel'
+import WorkspacePanel from './components/WorkspacePanel'
+import SkillsPanel from './components/SkillsPanel'
+import DatasetsPanel from './components/DatasetsPanel'
+import ChangelogPanel from './components/ChangelogPanel'
 
 const styles = {
   app: {
@@ -198,7 +203,7 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(true)
-  const [activeTab, setActiveTab] = useState('personas')
+  const [activeTab, setActiveTab] = useState('home')
   const [mainTab, setMainTab] = useState('chat') // 'chat' | 'terminal'
 
   // ── Auth state ──────────────────────────────────────────────────────────────
@@ -258,12 +263,17 @@ export default function App() {
   }, [])
 
   const renderDrawerTab = useCallback(() => {
-    if (activeTab === 'personas') return <PersonasPanel />
-    if (activeTab === 'services') return <HostedServicesPanel />
+    if (activeTab === 'home')       return <HomePanel onQuickPrompt={(p) => window.__nexusChat?.(p)} />
+    if (activeTab === 'personas')   return <PersonasPanel />
+    if (activeTab === 'services')   return <HostedServicesPanel />
     if (activeTab === 'automation') return <AutomationPanel />
-    if (activeTab === 'actions') return <ActionsPanel />
-    if (activeTab === 'snapshots') return <SnapshotPanel />
-    if (activeTab === 'community') return <CommunityPanel />
+    if (activeTab === 'actions')    return <ActionsPanel />
+    if (activeTab === 'snapshots')  return <SnapshotPanel />
+    if (activeTab === 'workspace')  return <WorkspacePanel />
+    if (activeTab === 'skills')     return <SkillsPanel onRunSkill={(p) => window.__nexusChat?.(p)} />
+    if (activeTab === 'datasets')   return <DatasetsPanel onUseDataset={(p) => window.__nexusChat?.(p)} />
+    if (activeTab === 'community')  return <CommunityPanel />
+    if (activeTab === 'changelog')  return <ChangelogPanel />
     return (
       <div style={styles.stack}>
         <div data-panel="account"><AccountPanel /></div>
@@ -308,12 +318,18 @@ export default function App() {
             <span>{selectedFile ? 'Focused' : 'Ready'}</span>
           </div>
           <div style={styles.railActions}>
+            <button style={styles.miniBtn} onClick={() => openTab('home')}>Home</button>
             <button style={styles.miniBtn} onClick={() => openTab('personas')}>Personas</button>
+            <button style={styles.miniBtn} onClick={() => openTab('skills')}>Skills</button>
+            <button style={styles.miniBtn} onClick={() => openTab('datasets')}>Datasets</button>
             <button style={styles.miniBtn} onClick={() => openTab('services')}>Services</button>
             <button style={styles.miniBtn} onClick={() => openTab('automation')}>Automation</button>
             <button style={styles.miniBtn} onClick={() => openTab('actions')}>Actions</button>
             <button style={styles.miniBtn} onClick={() => openTab('snapshots')}>Snapshots</button>
+            <button style={styles.miniBtn} onClick={() => openTab('workspace')}>Workspace</button>
+            <button style={styles.miniBtn} onClick={() => openTab('community')}>Community</button>
             <button style={styles.miniBtn} onClick={() => openTab('system')}>System</button>
+            <button style={styles.miniBtn} onClick={() => openTab('changelog')}>Updates</button>
           </div>
           <div data-panel="files">
             <FileExplorer
@@ -377,15 +393,20 @@ export default function App() {
           {drawerOpen && (
             <>
               <div style={styles.tabs}>
+                <button style={styles.tab(activeTab === 'home')} onClick={() => setActiveTab('home')}>Home</button>
                 <button style={styles.tab(activeTab === 'personas')} onClick={() => setActiveTab('personas')}>Personas</button>
+                <button style={styles.tab(activeTab === 'skills')} onClick={() => setActiveTab('skills')}>Skills</button>
+                <button style={styles.tab(activeTab === 'datasets')} onClick={() => setActiveTab('datasets')}>Datasets</button>
                 <button style={styles.tab(activeTab === 'services')} onClick={() => setActiveTab('services')}>
                   Services{unhealthyCount > 0 && <span style={styles.badge}>{unhealthyCount}</span>}
                 </button>
                 <button style={styles.tab(activeTab === 'automation')} onClick={() => setActiveTab('automation')}>Automation</button>
                 <button style={styles.tab(activeTab === 'actions')} onClick={() => setActiveTab('actions')}>Actions</button>
                 <button style={styles.tab(activeTab === 'snapshots')} onClick={() => setActiveTab('snapshots')}>Snapshots</button>
-                <button style={styles.tab(activeTab === 'system')} onClick={() => setActiveTab('system')}>System</button>
+                <button style={styles.tab(activeTab === 'workspace')} onClick={() => setActiveTab('workspace')}>Workspace</button>
                 <button style={styles.tab(activeTab === 'community')} onClick={() => setActiveTab('community')}>Community</button>
+                <button style={styles.tab(activeTab === 'system')} onClick={() => setActiveTab('system')}>System</button>
+                <button style={styles.tab(activeTab === 'changelog')} onClick={() => setActiveTab('changelog')}>Updates</button>
               </div>
               <div style={styles.drawerBody}>{renderDrawerTab()}</div>
             </>
