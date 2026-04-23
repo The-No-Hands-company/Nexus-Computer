@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useMemo } from 'react'
 import Header from './components/Header'
 import FileExplorer from './components/FileExplorer'
 import Chat from './components/Chat'
+import Terminal from './components/Terminal'
+import Login from './components/Login'
 import CommunityPanel from './components/CommunityPanel'
 import AccountPanel from './components/AccountPanel'
 import PluginPanel from './components/PluginPanel'
@@ -197,6 +199,39 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(true)
   const [activeTab, setActiveTab] = useState('personas')
+  const [mainTab, setMainTab] = useState('chat') // 'chat' | 'terminal'
+
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [authState, setAuthState] = useState('loading') // loading | setup | login | app
+
+  useEffect(() => {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(({ configured }) => {
+        if (!configured) { setAuthState('app'); return } // open mode
+        const token = localStorage.getItem('nexus_token')
+        setAuthState(token ? 'app' : 'login')
+      })
+      .catch(() => setAuthState('app'))
+  }, [])
+
+  const handleAuthDone = (token) => {
+    if (token) localStorage.setItem('nexus_token', token)
+    setAuthState('app')
+  }
+
+  // Show auth screens
+  if (authState === 'loading') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg)', color: 'var(--text-dim)', fontFamily: 'var(--font-brand)',
+        fontSize: '12px', letterSpacing: '0.15em' }}>
+        NEXUS INITIALIZING...
+      </div>
+    )
+  }
+  if (authState === 'setup') return <Login onDone={handleAuthDone} isSetup />
+  if (authState === 'login') return <Login onDone={handleAuthDone} isSetup={false} />
 
   const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
   const [unhealthyCount, setUnhealthyCount] = useState(0)
@@ -262,9 +297,9 @@ export default function App() {
     <div style={styles.app}>
       <Header onOpenPalette={() => setPaletteOpen(true)} />
       <div style={styles.topBanner}>
-        <span style={styles.pill}>Nexus uplink: chat-first interface</span>
-        <span style={styles.pill}>Modes: standalone + hub-integrated</span>
-        <span style={styles.pill}>Context drawer: on-demand support panels</span>
+        <span style={styles.pill}>Nexus.computer — self-hosted AI cloud computer</span>
+        <span style={styles.pill}>Powered by Nexus AI</span>
+        <span style={styles.pill}>Free · Open · Private</span>
       </div>
       <div style={styles.workspace}>
         <div style={styles.rail}>
@@ -290,11 +325,41 @@ export default function App() {
         </div>
 
         <div style={styles.stage}>
-          <Chat
-            selectedFile={selectedFile}
-            onFsChange={refresh}
-            onOpenPalette={() => setPaletteOpen(true)}
-          />
+          {/* Main tab bar */}
+          <div style={{
+            display: 'flex', gap: '2px', padding: '0 12px', height: '36px',
+            alignItems: 'center', background: 'var(--bg-2)',
+            borderBottom: '1px solid var(--border)', flexShrink: 0,
+          }}>
+            {[['chat', '⬡ Chat'], ['terminal', '$ Terminal']].map(([t, label]) => (
+              <button
+                key={t}
+                onClick={() => setMainTab(t)}
+                style={{
+                  padding: '4px 14px', borderRadius: 'var(--r)',
+                  fontSize: '10px', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600,
+                  color: mainTab === t ? 'var(--accent)' : 'var(--text-dim)',
+                  background: mainTab === t ? 'var(--accent-glow)' : 'transparent',
+                  border: mainTab === t ? '1px solid rgba(0,217,255,0.2)' : '1px solid transparent',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}
+              >{label}</button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            <div style={{ display: mainTab === 'chat' ? 'flex' : 'none', flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+              <Chat
+                selectedFile={selectedFile}
+                onFsChange={refresh}
+                onOpenPalette={() => setPaletteOpen(true)}
+              />
+            </div>
+            <div style={{ display: mainTab === 'terminal' ? 'flex' : 'none', flex: 1, overflow: 'hidden' }}>
+              <Terminal active={mainTab === 'terminal'} />
+            </div>
+          </div>
         </div>
 
         <div style={styles.drawer(drawerOpen)}>

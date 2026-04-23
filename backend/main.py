@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
@@ -15,6 +15,11 @@ import uuid
 from datetime import datetime, timezone
 
 from agent import run_agent_stream
+from auth import (
+    auth_configured, setup_password, verify_password,
+    create_token, decode_token, require_auth, set_workspace,
+)
+from terminal import terminal_ws
 from tools import list_files_api, read_file_api, write_file_api, delete_file_api, search_files_api, _safe
 from action_ledger import ensure_action_ledger, list_actions, append_action
 from policy import ensure_policy, load_policy
@@ -79,6 +84,7 @@ app.add_middleware(
 
 WORKSPACE = os.environ.get("WORKSPACE_DIR", "/workspace")
 os.makedirs(WORKSPACE, exist_ok=True)
+set_workspace(WORKSPACE)
 START_TIME = time.time()
 DATA_DIR = os.path.join(WORKSPACE, ".nexus")
 ACCOUNT_FILE = os.path.join(DATA_DIR, "account.json")
@@ -398,6 +404,51 @@ async def shutdown_event():
 @app.get("/api/health")
 async def health():
     return {"status": "online", "workspace": WORKSPACE}
+
+
+# ── Auth ───────────────────────────────────────────────────────────────────────
+
+class AuthSetupRequest(BaseModel):
+    password: str
+
+class AuthLoginRequest(BaseModel):
+    password: str
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    return {"configured": auth_configured(WORKSPACE)}
+
+
+@app.post("/api/auth/setup")
+async def auth_setup(body: AuthSetupRequest):
+    if len(body.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    if not setup_password(WORKSPACE, body.password):
+        raise HTTPException(400, "Auth already configured")
+    return {"token": create_token(), "status": "configured"}
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: AuthLoginRequest):
+    if not verify_password(WORKSPACE, body.password):
+        raise HTTPException(401, "Invalid password")
+    return {"token": create_token()}
+
+
+# ── Terminal WebSocket ─────────────────────────────────────────────────────────
+
+@app.websocket("/api/terminal")
+async def terminal_endpoint(websocket: WebSocket, token: str = ""):
+    if auth_configured(WORKSPACE):
+        try:
+            decode_token(token)
+        except Exception:
+            await websocket.close(code=4001)
+            return
+    account = _load_account()
+    username = account.get("handle", "nexus")
+    await terminal_ws(websocket, WORKSPACE, username=username)
 
 
 @app.get("/api/meta")
