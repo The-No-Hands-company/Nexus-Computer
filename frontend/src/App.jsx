@@ -199,47 +199,26 @@ const styles = {
 }
 
 export default function App() {
+  // ── All hooks first (Rules of Hooks — no early returns before this block) ──
   const [refreshKey, setRefreshKey] = useState(0)
   const [selectedFile, setSelectedFile] = useState(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(true)
   const [activeTab, setActiveTab] = useState('home')
-  const [mainTab, setMainTab] = useState('chat') // 'chat' | 'terminal'
-
-  // ── Auth state ──────────────────────────────────────────────────────────────
-  const [authState, setAuthState] = useState('loading') // loading | setup | login | app
+  const [mainTab, setMainTab] = useState('chat')
+  const [authState, setAuthState] = useState('loading')
+  const [unhealthyCount, setUnhealthyCount] = useState(0)
 
   useEffect(() => {
     fetch('/api/auth/status')
       .then(r => r.json())
       .then(({ configured }) => {
-        if (!configured) { setAuthState('app'); return } // open mode
+        if (!configured) { setAuthState('app'); return }
         const token = localStorage.getItem('nexus_token')
         setAuthState(token ? 'app' : 'login')
       })
       .catch(() => setAuthState('app'))
   }, [])
-
-  const handleAuthDone = (token) => {
-    if (token) localStorage.setItem('nexus_token', token)
-    setAuthState('app')
-  }
-
-  // Show auth screens
-  if (authState === 'loading') {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg)', color: 'var(--text-dim)', fontFamily: 'var(--font-brand)',
-        fontSize: '12px', letterSpacing: '0.15em' }}>
-        NEXUS INITIALIZING...
-      </div>
-    )
-  }
-  if (authState === 'setup') return <Login onDone={handleAuthDone} isSetup />
-  if (authState === 'login') return <Login onDone={handleAuthDone} isSetup={false} />
-
-  const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
-  const [unhealthyCount, setUnhealthyCount] = useState(0)
 
   useEffect(() => {
     const poll = () =>
@@ -257,12 +236,32 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
 
+  const refresh = useCallback(() => setRefreshKey(k => k + 1), [])
+
   const openTab = useCallback((tab) => {
     setActiveTab(tab)
     setDrawerOpen(true)
   }, [])
 
-  const renderDrawerTab = useCallback(() => {
+  const handleAuthDone = useCallback((token) => {
+    if (token) localStorage.setItem('nexus_token', token)
+    setAuthState('app')
+  }, [])
+
+  // ── Auth guards (all hooks are above — safe to return early now) ──────────
+  if (authState === 'loading') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', background: 'var(--bg)', color: 'var(--text-dim)',
+        fontFamily: 'var(--font-brand)', fontSize: '12px', letterSpacing: '0.15em' }}>
+        NEXUS INITIALIZING...
+      </div>
+    )
+  }
+  if (authState === 'setup') return <Login onDone={handleAuthDone} isSetup />
+  if (authState === 'login') return <Login onDone={handleAuthDone} isSetup={false} />
+
+  const renderDrawerTab = () => {
     if (activeTab === 'home')       return <HomePanel onQuickPrompt={(p) => window.__nexusChat?.(p)} />
     if (activeTab === 'personas')   return <PersonasPanel />
     if (activeTab === 'services')   return <HostedServicesPanel />
@@ -285,7 +284,7 @@ export default function App() {
         <div data-panel="tools-hub"><ToolsHubPanel /></div>
       </div>
     )
-  }, [activeTab])
+  }
 
   const commands = useMemo(() => ([
     { id: 'new-chat', label: 'New chat', description: 'Clear the current conversation', keywords: ['chat', 'reset'], action: () => window.location.reload() },
