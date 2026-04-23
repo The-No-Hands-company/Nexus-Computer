@@ -248,6 +248,22 @@ export default function App() {
     setAuthState('app')
   }, [])
 
+  const commands = useMemo(() => ([
+    { id: 'new-chat', label: 'New chat', description: 'Clear the current conversation', keywords: ['chat', 'reset'], action: () => window.location.reload() },
+    { id: 'refresh-workspace', label: 'Refresh workspace', description: 'Reload the file explorer and metadata', keywords: ['files', 'reload'], action: refresh },
+    { id: 'open-community', label: 'Open community panel', description: 'Show feature voting in contextual drawer', keywords: ['community', 'requests'], action: () => openTab('community') },
+    { id: 'open-files', label: 'Focus files rail', description: 'Bring workspace explorer into view', keywords: ['files', 'explorer'], action: () => document.querySelector('[data-panel="files"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
+    { id: 'open-account', label: 'Open system panel', description: 'Show account and system controls', keywords: ['account', 'sessions'], action: () => openTab('system') },
+    { id: 'open-personas', label: 'Open personas panel', description: 'Show persona presets and prompt controls', keywords: ['persona', 'prompts', 'system'], action: () => openTab('personas') },
+    { id: 'open-plugins', label: 'Open system plugins', description: 'Show plugin installs', keywords: ['plugins', 'apps'], action: () => openTab('system') },
+    { id: 'open-network', label: 'Open system network', description: 'Show federation network stats', keywords: ['network', 'federation', 'nodes', 'health'], action: () => openTab('system') },
+    { id: 'open-services', label: 'Open hosted services', description: 'Start, stop, and monitor long-running apps', keywords: ['services', 'hosting', 'ports', 'processes'], action: () => openTab('services') },
+    { id: 'open-automation', label: 'Open automation', description: 'Manage scheduled always-on jobs', keywords: ['automation', 'jobs', 'schedule', 'cron'], action: () => openTab('automation') },
+    { id: 'open-actions', label: 'Open action ledger', description: 'Show recent tool events and results', keywords: ['actions', 'ledger', 'audit'], action: () => openTab('actions') },
+    { id: 'open-snapshots', label: 'Open snapshots', description: 'Manage workspace backup and restore', keywords: ['snapshot', 'restore', 'backup'], action: () => openTab('snapshots') },
+    { id: 'open-tools-hub', label: 'Open deployment panel', description: 'Review deployment and federation controls', keywords: ['tools', 'hub', 'standalone', 'cloud'], action: () => openTab('system') },
+  ]), [refresh, openTab])
+
   // ── Auth guards (all hooks are above — safe to return early now) ──────────
   if (authState === 'loading') {
     return (
@@ -285,22 +301,6 @@ export default function App() {
       </div>
     )
   }
-
-  const commands = useMemo(() => ([
-    { id: 'new-chat', label: 'New chat', description: 'Clear the current conversation', keywords: ['chat', 'reset'], action: () => window.location.reload() },
-    { id: 'refresh-workspace', label: 'Refresh workspace', description: 'Reload the file explorer and metadata', keywords: ['files', 'reload'], action: refresh },
-    { id: 'open-community', label: 'Open community panel', description: 'Show feature voting in contextual drawer', keywords: ['community', 'requests'], action: () => openTab('community') },
-    { id: 'open-files', label: 'Focus files rail', description: 'Bring workspace explorer into view', keywords: ['files', 'explorer'], action: () => document.querySelector('[data-panel="files"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) },
-    { id: 'open-account', label: 'Open system panel', description: 'Show account and system controls', keywords: ['account', 'sessions'], action: () => openTab('system') },
-    { id: 'open-personas', label: 'Open personas panel', description: 'Show persona presets and prompt controls', keywords: ['persona', 'prompts', 'system'], action: () => openTab('personas') },
-    { id: 'open-plugins', label: 'Open system plugins', description: 'Show plugin installs', keywords: ['plugins', 'apps'], action: () => openTab('system') },
-    { id: 'open-network', label: 'Open system network', description: 'Show federation network stats', keywords: ['network', 'federation', 'nodes', 'health'], action: () => openTab('system') },
-    { id: 'open-services', label: 'Open hosted services', description: 'Start, stop, and monitor long-running apps', keywords: ['services', 'hosting', 'ports', 'processes'], action: () => openTab('services') },
-    { id: 'open-automation', label: 'Open automation', description: 'Manage scheduled always-on jobs', keywords: ['automation', 'jobs', 'schedule', 'cron'], action: () => openTab('automation') },
-    { id: 'open-actions', label: 'Open action ledger', description: 'Show recent tool events and results', keywords: ['actions', 'ledger', 'audit'], action: () => openTab('actions') },
-    { id: 'open-snapshots', label: 'Open snapshots', description: 'Manage workspace backup and restore', keywords: ['snapshot', 'restore', 'backup'], action: () => openTab('snapshots') },
-    { id: 'open-tools-hub', label: 'Open deployment panel', description: 'Review deployment and federation controls', keywords: ['tools', 'hub', 'standalone', 'cloud'], action: () => openTab('system') },
-  ]), [refresh, openTab])
 
   return (
     <div style={styles.app}>
