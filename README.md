@@ -81,4 +81,4 @@ Then run the Python app with the built frontend available under `frontend/dist`.
 
 ## License
 
-Add the license you want to ship with before public release.
+AGPL-3.0-or-later. See [LICENSE](LICENSE).
